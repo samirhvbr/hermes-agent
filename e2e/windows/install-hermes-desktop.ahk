@@ -110,6 +110,7 @@ ClickCenterOfImageInWindow(winTitle, "install-button.png")
 
 ClickCenterOfImageInWindow(winTitle, "launch-button.png", 1000 * 60 * 8)
 
+Sleep(2000)
 
 ; done
 ExitApp(0)
