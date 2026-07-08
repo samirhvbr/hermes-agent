@@ -309,8 +309,7 @@ function autoReloadRow(billing: BillingStateResponse): BillingAccountRowView {
 
   if (!autoReload.enabled) {
     return {
-      action: { disabled: true, label: 'Manage' },
-      caption: 'Enable from the portal',
+      caption: 'Turn on auto-refill from the portal',
       description: 'Keep your balance topped up when it drops below your threshold.',
       id: 'auto_reload',
       pill: { label: 'Off', tone: 'muted' },
@@ -319,7 +318,7 @@ function autoReloadRow(billing: BillingStateResponse): BillingAccountRowView {
   }
 
   return {
-    action: { disabled: true, label: 'Manage' },
+    action: { label: 'Manage' },
     caption: `Refill ${autoReload.reload_to_display || formatMoney(autoReload.reload_to_usd)} when balance falls below ${
       autoReload.threshold_display || formatMoney(autoReload.threshold_usd)
     }`,

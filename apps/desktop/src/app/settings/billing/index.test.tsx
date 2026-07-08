@@ -97,6 +97,81 @@ describe('BillingSettings', () => {
     expect(screen.getByRole('button', { name: /^Buy$/ }).hasAttribute('disabled')).toBe(false)
   })
 
+  it('saves enabled auto-refill edits and refreshes billing state', async () => {
+    const client = renderBilling()
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+
+    apiMocks.updateAutoReload.mockResolvedValue({ data: { ok: true }, ok: true })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Manage' }))
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Auto-refill threshold' }), {
+      target: { value: '7.50' }
+    })
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Auto-refill reload-to amount' }), {
+      target: { value: '20' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() =>
+      expect(apiMocks.updateAutoReload).toHaveBeenCalledWith({
+        enabled: true,
+        reload_to_usd: '20',
+        threshold_usd: '7.5'
+      })
+    )
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['billing', 'state'] }))
+    expect(await screen.findByText('Auto-refill updated.')).toBeTruthy()
+  })
+
+  it('requires inline confirmation before disabling auto-refill', async () => {
+    renderBilling()
+
+    apiMocks.updateAutoReload.mockResolvedValue({ data: { ok: true }, ok: true })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Manage' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Disable' }))
+
+    expect(screen.getByText('Turn off auto-refill?')).toBeTruthy()
+    expect(apiMocks.updateAutoReload).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Turn off' }))
+
+    await waitFor(() => expect(apiMocks.updateAutoReload).toHaveBeenCalledWith({ enabled: false }))
+  })
+
+  it('renders auto-refill mutation refusals and step-up affordance', async () => {
+    renderBilling()
+
+    apiMocks.updateAutoReload.mockResolvedValue({
+      ok: false,
+      refusal: {
+        kind: 'insufficient_scope',
+        message: 'billing:manage required'
+      }
+    })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Manage' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByText('Terminal billing needs approval:')).toBeTruthy()
+    expect(
+      screen.getByText('This needs terminal billing enabled. Start a top-up to enable it, then retry.')
+    ).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Verify to continue' })).toBeTruthy()
+  })
+
+  it('keeps disabled auto-refill portal-only with no enable control', async () => {
+    apiMocks.fetchBillingState.mockResolvedValue(okBilling(postTrainBillingState))
+    apiMocks.fetchSubscriptionState.mockResolvedValue(okSubscription(postTrainSubscriptionState))
+
+    renderBilling()
+
+    expect((await screen.findAllByText('Off')).length).toBeGreaterThan(0)
+    expect(screen.getByText('Turn on auto-refill from the portal')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /enable/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Manage' })).toBeNull()
+  })
+
   it('disables buy controls while polling and renders the settled outcome', async () => {
     let settleStatus: (value: unknown) => void = () => {}
 

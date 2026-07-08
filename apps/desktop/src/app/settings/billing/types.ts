@@ -20,7 +20,15 @@ export interface BillingMonthlyCap {
   spent_this_month_usd: string | null
 }
 
+export interface BillingDollarBounds {
+  maxUsd?: null | string
+  max_usd?: null | string
+  minUsd?: null | string
+  min_usd?: null | string
+}
+
 export interface BillingAutoReload {
+  bounds?: BillingDollarBounds | null
   enabled: boolean
   reload_to_display: string
   reload_to_usd: string | null

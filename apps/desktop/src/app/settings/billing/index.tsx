@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -7,7 +8,10 @@ import { cn } from '@/lib/utils'
 
 import { ListRow, Pill, SectionHeading, SettingsContent } from '../primitives'
 
-import type { BillingStateResponse } from './types'
+import type { BillingRefusal } from './api'
+import { useBillingApi } from './api'
+import { resolveRefusal } from './errors'
+import type { BillingAutoReload, BillingStateResponse } from './types'
 import {
   type BillingAccountRowView,
   type BillingNoticeView,
@@ -18,6 +22,7 @@ import {
   useSubscriptionState
 } from './use-billing-state'
 import { useChargeFlow } from './use-charge-poller'
+import { useStepUpFlow } from './use-step-up'
 
 const FEATURE_BILLING_INVOICES = false
 
@@ -65,7 +70,7 @@ function NoticeCard({ notice }: { notice: BillingNoticeView }) {
   )
 }
 
-function RowValue({ row }: { row: BillingAccountRowView }) {
+function RowValue({ onAction, row }: { onAction?: () => void; row: BillingAccountRowView }) {
   return (
     <div className="flex min-w-0 flex-wrap items-center justify-start gap-2 @2xl:justify-end">
       {row.value && (
@@ -83,7 +88,7 @@ function RowValue({ row }: { row: BillingAccountRowView }) {
       {row.action && (
         <Button
           disabled={row.action.disabled}
-          onClick={row.action.disabled ? undefined : () => openExternal(row.action?.url)}
+          onClick={row.action.disabled ? undefined : onAction ? onAction : () => openExternal(row.action?.url)}
           size="sm"
           type="button"
           variant="outline"
@@ -101,6 +106,10 @@ function AccountRow({ billing, row }: { billing?: BillingStateResponse; row: Bil
     return <BuyCreditsRow billing={billing} row={row} />
   }
 
+  if (row.id === 'auto_reload' && billing?.auto_reload) {
+    return <AutoReloadRow autoReload={billing.auto_reload} row={row} />
+  }
+
   return (
     <ListRow
       action={<RowValue row={row} />}
@@ -111,6 +120,193 @@ function AccountRow({ billing, row }: { billing?: BillingStateResponse; row: Bil
           </div>
         ) : undefined
       }
+      description={row.description}
+      key={row.id}
+      title={row.title}
+    />
+  )
+}
+
+function AutoReloadRow({ autoReload, row }: { autoReload: BillingAutoReload; row: BillingAccountRowView }) {
+  const api = useBillingApi()
+  const queryClient = useQueryClient()
+  const [confirmDisable, setConfirmDisable] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [message, setMessage] = useState<null | { kind: 'error' | 'success'; text: string }>(null)
+  const [refusal, setRefusal] = useState<BillingRefusal | null>(null)
+
+  const [reloadTo, setReloadTo] = useState(
+    initialAutoReloadAmount(autoReload.reload_to_usd, autoReload.reload_to_display)
+  )
+
+  const [saving, setSaving] = useState(false)
+
+  const [threshold, setThreshold] = useState(
+    initialAutoReloadAmount(autoReload.threshold_usd, autoReload.threshold_display)
+  )
+
+  const validation = validateAutoReloadInputs(threshold, reloadTo, autoReload)
+  const busy = saving
+  const maxBound = autoReload.bounds?.max_usd ?? autoReload.bounds?.maxUsd ?? undefined
+  const minBound = autoReload.bounds?.min_usd ?? autoReload.bounds?.minUsd ?? undefined
+
+  const resetFeedback = () => {
+    setConfirmDisable(false)
+    setMessage(null)
+    setRefusal(null)
+  }
+
+  const save = async () => {
+    if (!validation.values || busy) {
+      return
+    }
+
+    resetFeedback()
+    setSaving(true)
+
+    const result = await api.updateAutoReload({
+      enabled: true,
+      reload_to_usd: validation.values.reloadTo,
+      threshold_usd: validation.values.threshold
+    })
+
+    setSaving(false)
+
+    if (!result.ok) {
+      setRefusal(result.refusal)
+
+      return
+    }
+
+    await queryClient.invalidateQueries({ queryKey: ['billing', 'state'] })
+    setMessage({ kind: 'success', text: 'Auto-refill updated.' })
+    setEditing(false)
+  }
+
+  const disable = async () => {
+    if (busy) {
+      return
+    }
+
+    resetFeedback()
+    setSaving(true)
+
+    const result = await api.updateAutoReload({ enabled: false })
+
+    setSaving(false)
+
+    if (!result.ok) {
+      setRefusal(result.refusal)
+
+      return
+    }
+
+    await queryClient.invalidateQueries({ queryKey: ['billing', 'state'] })
+    setMessage({ kind: 'success', text: 'Auto-refill turned off.' })
+    setEditing(false)
+  }
+
+  const below = editing ? (
+    <div className="mt-3 space-y-3">
+      <div className="grid gap-2 @2xl:grid-cols-2">
+        <label className="min-w-0 text-[length:var(--conversation-caption-font-size)] text-(--ui-text-tertiary)">
+          Threshold
+          <Input
+            aria-label="Auto-refill threshold"
+            className="mt-1 h-8"
+            disabled={busy}
+            inputMode="decimal"
+            max={maxBound}
+            min={minBound}
+            onChange={event => {
+              resetFeedback()
+              setThreshold(event.target.value)
+            }}
+            step="0.01"
+            type="number"
+            value={threshold}
+          />
+        </label>
+        <label className="min-w-0 text-[length:var(--conversation-caption-font-size)] text-(--ui-text-tertiary)">
+          Reload to
+          <Input
+            aria-label="Auto-refill reload-to amount"
+            className="mt-1 h-8"
+            disabled={busy}
+            inputMode="decimal"
+            max={maxBound}
+            min={minBound}
+            onChange={event => {
+              resetFeedback()
+              setReloadTo(event.target.value)
+            }}
+            step="0.01"
+            type="number"
+            value={reloadTo}
+          />
+        </label>
+      </div>
+      {validation.error && (
+        <div className="text-[length:var(--conversation-caption-font-size)] text-destructive">{validation.error}</div>
+      )}
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <Button disabled={busy || !validation.values} onClick={() => void save()} size="sm" type="button">
+          {busy ? 'Saving…' : 'Save'}
+        </Button>
+        <Button disabled={busy} onClick={() => setConfirmDisable(true)} size="sm" type="button" variant="outline">
+          Disable
+        </Button>
+        <Button
+          disabled={busy}
+          onClick={() => {
+            resetFeedback()
+            setEditing(false)
+          }}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          Cancel
+        </Button>
+      </div>
+      {confirmDisable && (
+        <div className="flex min-w-0 flex-wrap items-center gap-2 text-[length:var(--conversation-caption-font-size)] text-(--ui-text-tertiary)">
+          <span>Turn off auto-refill?</span>
+          <Button disabled={busy} onClick={() => void disable()} size="sm" type="button" variant="outline">
+            Turn off
+          </Button>
+          <Button disabled={busy} onClick={() => setConfirmDisable(false)} size="sm" type="button" variant="ghost">
+            Cancel
+          </Button>
+        </div>
+      )}
+      <BillingRefusalInline refusal={refusal} />
+      {message && <InlineMessage kind={message.kind}>{message.text}</InlineMessage>}
+    </div>
+  ) : (
+    <>
+      {row.caption ? (
+        <div className="mt-1 text-[length:var(--conversation-caption-font-size)] text-(--ui-text-tertiary)">
+          {row.caption}
+        </div>
+      ) : null}
+      <BillingRefusalInline refusal={refusal} />
+      {message && <InlineMessage kind={message.kind}>{message.text}</InlineMessage>}
+    </>
+  )
+
+  return (
+    <ListRow
+      action={
+        <RowValue
+          onAction={() => {
+            resetFeedback()
+            setEditing(true)
+          }}
+          row={row}
+        />
+      }
+      below={below}
       description={row.description}
       key={row.id}
       title={row.title}
@@ -218,6 +414,8 @@ function BuyCreditsOutcome({
   onRetry: () => void
   outcome: ReturnType<typeof useChargeFlow>['outcome']
 }) {
+  const stepUp = useStepUpFlow()
+
   if (busy) {
     return (
       <div className="mt-2 text-[length:var(--conversation-caption-font-size)] text-(--ui-text-tertiary)">
@@ -266,12 +464,89 @@ function BuyCreditsOutcome({
           Retry
         </Button>
       )}
+      {outcome.action?.type === 'step_up' && <StepUpInlineAction flow={stepUp} />}
       {portalUrl && (
         <Button onClick={() => onPortal(portalUrl)} size="sm" type="button" variant="outline">
           Open portal
           <ExternalLink className="size-3.5" />
         </Button>
       )}
+    </div>
+  )
+}
+
+function BillingRefusalInline({ refusal }: { refusal: BillingRefusal | null }) {
+  const stepUp = useStepUpFlow()
+
+  if (!refusal) {
+    return null
+  }
+
+  const resolved = resolveRefusal(refusal)
+  const portalUrl = resolved.action.type === 'portal' ? resolved.action.url : undefined
+
+  return (
+    <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2 text-[length:var(--conversation-caption-font-size)] text-(--ui-text-tertiary)">
+      <span>
+        <span className="font-medium text-foreground">{resolved.title}:</span> {resolved.message}
+      </span>
+      {resolved.action.type === 'step_up' && <StepUpInlineAction flow={stepUp} />}
+      {portalUrl && (
+        <Button onClick={() => openExternal(portalUrl)} size="sm" type="button" variant="outline">
+          Open portal
+          <ExternalLink className="size-3.5" />
+        </Button>
+      )}
+    </div>
+  )
+}
+
+function StepUpInlineAction({ flow }: { flow: ReturnType<typeof useStepUpFlow> }) {
+  if (flow.verification) {
+    return (
+      <span className="inline-flex min-w-0 flex-wrap items-center gap-2">
+        <span className="font-mono text-[0.72rem] font-semibold text-foreground">{flow.verification.code}</span>
+        <Button onClick={flow.openVerification} size="sm" type="button" variant="outline">
+          Open verification page
+          <ExternalLink className="size-3.5" />
+        </Button>
+      </span>
+    )
+  }
+
+  if (flow.message) {
+    return (
+      <span className="inline-flex min-w-0 flex-wrap items-center gap-2">
+        <span>
+          {flow.message.title}: {flow.message.text}
+        </span>
+        <Button onClick={flow.dismiss} size="sm" type="button" variant="outline">
+          Dismiss
+        </Button>
+      </span>
+    )
+  }
+
+  if (flow.phase === 'waiting') {
+    return <span>Waiting for verification link…</span>
+  }
+
+  return (
+    <Button onClick={() => void flow.start()} size="sm" type="button" variant="outline">
+      Verify to continue
+    </Button>
+  )
+}
+
+function InlineMessage({ children, kind }: { children: string; kind: 'error' | 'success' }) {
+  return (
+    <div
+      className={cn(
+        'mt-2 text-[length:var(--conversation-caption-font-size)]',
+        kind === 'error' ? 'text-destructive' : 'text-(--ui-text-tertiary)'
+      )}
+    >
+      {children}
     </div>
   )
 }
@@ -396,6 +671,79 @@ function parseAmount(value?: null | number | string): null | number {
 
 function formatAmountForRequest(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')
+}
+
+function initialAutoReloadAmount(...candidates: Array<null | string | undefined>): string {
+  for (const candidate of candidates) {
+    const amount = parseAmount(candidate)
+
+    if (amount != null) {
+      return formatAmountForRequest(amount)
+    }
+  }
+
+  return ''
+}
+
+function validateAutoReloadInputs(
+  thresholdRaw: string,
+  reloadToRaw: string,
+  autoReload: Pick<BillingAutoReload, 'bounds'>
+): { error?: string; values?: { reloadTo: string; threshold: string } } {
+  const threshold = validateBillingAmount('Threshold', thresholdRaw, autoReload)
+
+  if (threshold.error || threshold.amount == null) {
+    return { error: threshold.error }
+  }
+
+  const reloadTo = validateBillingAmount('Reload-to', reloadToRaw, autoReload)
+
+  if (reloadTo.error || reloadTo.amount == null) {
+    return { error: reloadTo.error }
+  }
+
+  if (reloadTo.amount <= threshold.amount) {
+    return { error: 'Reload-to amount must be greater than the threshold.' }
+  }
+
+  return {
+    values: {
+      reloadTo: formatAmountForRequest(reloadTo.amount),
+      threshold: formatAmountForRequest(threshold.amount)
+    }
+  }
+}
+
+function validateBillingAmount(
+  label: string,
+  raw: string,
+  autoReload: Pick<BillingAutoReload, 'bounds'>
+): { amount?: number; error?: string } {
+  const cleaned = raw.trim().replace(/^\$/, '').trim()
+
+  if (!cleaned || !/^\d+(\.\d{1,2})?$/.test(cleaned)) {
+    return { error: `${label}: enter a dollar amount with at most 2 decimal places.` }
+  }
+
+  const amount = Number(cleaned)
+
+  if (!(amount > 0)) {
+    return { error: `${label}: amount must be greater than $0.` }
+  }
+
+  const min = parseAmount(autoReload.bounds?.min_usd ?? autoReload.bounds?.minUsd)
+
+  if (min != null && amount < min) {
+    return { error: `${label}: minimum is ${formatMoney(min)}.` }
+  }
+
+  const max = parseAmount(autoReload.bounds?.max_usd ?? autoReload.bounds?.maxUsd)
+
+  if (max != null && amount > max) {
+    return { error: `${label}: maximum is ${formatMoney(max)}.` }
+  }
+
+  return { amount }
 }
 
 function formatMoney(value?: null | number | string): string {

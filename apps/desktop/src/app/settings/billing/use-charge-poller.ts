@@ -17,7 +17,7 @@ export type ChargeFlowOutcome =
       message: string
     }
   | {
-      action?: { type: 'portal'; url?: string } | { type: 'retry' }
+      action?: { type: 'portal'; url?: string } | { type: 'retry' } | { type: 'step_up' }
       kind: 'failure'
       message: string
       retryFreshKey: boolean
@@ -167,7 +167,9 @@ export function useChargeFlow() {
             ? ({ type: 'portal', url: resolved.action.url } as const)
             : resolved.action.type === 'retry'
               ? ({ type: 'retry' } as const)
-              : undefined
+              : resolved.action.type === 'step_up'
+                ? ({ type: 'step_up' } as const)
+                : undefined
 
         retryIntentRef.current = shouldReuseIdempotencyKey(chargeResult.refusal)
           ? { amountUsd, idempotencyKey: chargeResult.idempotencyKey }
