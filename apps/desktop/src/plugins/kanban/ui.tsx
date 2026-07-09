@@ -8,12 +8,11 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-  GlyphSpinner,
   profileColor,
   profileColorSoft,
   relativeTime
 } from '@hermes/plugin-sdk'
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type ReactNode, useLayoutEffect, useRef, useState } from 'react'
 
 import { columnMeta } from './types'
 
@@ -130,32 +129,6 @@ export function StatusMenu({
           ))}
       </DropdownMenuContent>
     </DropdownMenu>
-  )
-}
-
-/** Quiet data-freshness line: a tiny spinner while a refetch is in flight,
- *  otherwise "updated N ago" (canonical `relativeTime`, ticking so it never
- *  goes stale). Answers "is this thing live or frozen?" without chrome. */
-export function Freshness({ fetching, updatedAt }: { fetching: boolean; updatedAt: number }) {
-  const [, setTick] = useState(0)
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setTick(t => t + 1), 10_000)
-
-    return () => window.clearInterval(timer)
-  }, [])
-
-  return (
-    <span className="inline-flex items-center gap-1.5 text-[0.625rem] text-(--ui-text-quaternary)">
-      {fetching ? (
-        <>
-          <GlyphSpinner ariaLabel="Refreshing" className="text-[0.625rem]" />
-          refreshing…
-        </>
-      ) : updatedAt > 0 ? (
-        `updated ${relativeTime(updatedAt)}`
-      ) : null}
-    </span>
   )
 }
 

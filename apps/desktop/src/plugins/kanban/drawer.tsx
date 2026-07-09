@@ -54,7 +54,6 @@ import {
   Avatar,
   duration,
   errText,
-  Freshness,
   isLockedTarget,
   LOCKED_COLUMNS,
   ScrollFade,
@@ -341,16 +340,12 @@ export function TaskDrawer({
   const qc = useQueryClient()
   const slug = useValue($boardSlug)
 
-  const {
-    data: detail,
-    dataUpdatedAt,
-    error,
-    isFetching
-  } = useQuery({
+  // Socket-invalidated (bindApi); the interval is only the socketless heartbeat.
+  const { data: detail, error } = useQuery({
     enabled: !!id,
     queryFn: () => fetchTask(id!),
     queryKey: taskKey(slug, id ?? ''),
-    refetchInterval: 4_000
+    refetchInterval: 30_000
   })
 
   const task = detail?.task
@@ -691,11 +686,6 @@ export function TaskDrawer({
         )}
       </div>
 
-      {detail && (
-        <div className="pointer-events-none absolute right-3 bottom-1.5 z-10 rounded bg-[color-mix(in_srgb,var(--ui-bg-elevated)_85%,transparent)] leading-none">
-          <Freshness fetching={isFetching} updatedAt={dataUpdatedAt} />
-        </div>
-      )}
     </div>
   )
 }

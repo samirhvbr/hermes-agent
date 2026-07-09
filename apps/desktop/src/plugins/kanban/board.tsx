@@ -65,7 +65,7 @@ import { BoardSwitcher } from './board-switcher'
 import { TaskDrawer } from './drawer'
 import { OrchestrationPanel } from './orchestration'
 import { columnMeta, type KanbanBoard, type KanbanTask } from './types'
-import { ago, Avatar, errText, Freshness, isLockedTarget, LOCKED_COLUMNS, shortId } from './ui'
+import { ago, Avatar, errText, isLockedTarget, LOCKED_COLUMNS, shortId } from './ui'
 
 // ── optimistic board edits (reconciled by the follow-up refresh) ─────────────
 
@@ -668,10 +668,12 @@ export function KanbanBoardPage() {
   const slug = useValue($boardSlug)
   const [archived, setArchived] = useState(false)
 
-  const { data: board, dataUpdatedAt, error, isFetching } = useQuery({
+  // Live updates ride the events socket (bindApi); this interval is only the
+  // slow heartbeat for socketless paths (OAuth remotes, dropped connections).
+  const { data: board, error } = useQuery({
     queryFn: () => fetchBoard(archived),
     queryKey: boardKey(slug, archived),
-    refetchInterval: 8_000
+    refetchInterval: 60_000
   })
 
   const [openId, setOpenId] = useState<null | string>(null)
@@ -902,12 +904,6 @@ export function KanbanBoardPage() {
               onOpen={setOpenId}
             />
           ))}
-        </div>
-      )}
-
-      {board && (
-        <div className="pointer-events-none absolute right-4 bottom-1.5 z-10 rounded bg-[color-mix(in_srgb,var(--ui-surface-background)_85%,transparent)] leading-none">
-          <Freshness fetching={isFetching} updatedAt={dataUpdatedAt} />
         </div>
       )}
 
