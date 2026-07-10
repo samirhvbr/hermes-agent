@@ -2201,7 +2201,6 @@ export const ja = defineLocale({
     hideHeader: 'ヘッダーを隠す',
     minimize: '最小化',
     restore: '復元',
-    closeTab: label => `${label} を閉じる`,
     split: dir => `${dir}に分割`,
     move: dir => `${dir}へ移動`,
     dirUp: '上',

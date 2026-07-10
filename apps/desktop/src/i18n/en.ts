@@ -2241,7 +2241,6 @@ export const en: Translations = {
     hideHeader: 'Hide header',
     minimize: 'Minimize',
     restore: 'Restore',
-    closeTab: label => `Close ${label}`,
     split: dir => `Split ${dir}`,
     move: dir => `Move ${dir}`,
     dirUp: 'up',

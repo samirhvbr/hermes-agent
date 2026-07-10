@@ -1877,7 +1877,6 @@ export interface Translations {
     hideHeader: string
     minimize: string
     restore: string
-    closeTab: (label: string) => string
     split: (dir: string) => string
     move: (dir: string) => string
     dirUp: string

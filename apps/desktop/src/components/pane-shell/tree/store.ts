@@ -23,7 +23,7 @@ import {
   isLayoutNode,
   type LayoutNode,
   mergeZonesWithPane as mergeZonesWithPaneOp,
-  mirrorRootRow,
+  mirrorTreeHorizontal,
   movePane as movePaneOp,
   normalize,
   removePane,
@@ -238,6 +238,48 @@ export function setTreeSideCollapsed(side: TreeSide, collapsed: boolean) {
   if (next) {
     $collapsedTreeSides.set(next)
   }
+
+  // Opening a side is an intent to SEE it — heal any pane of that side that a
+  // stale dismissal record removed from the tree, so ⌘B/⌘J can never press on
+  // nothing. Closing chrome panes is NEVER permanent (main parity).
+  if (!collapsed) {
+    restoreDismissedSidePanes(side)
+  }
+}
+
+/**
+ * Un-dismiss + re-adopt every registered pane whose placement maps to `side`
+ * (the same semantic mapping as `rootChildSide`: 'left' panes ⇔ ⌘B, everything
+ * else non-main ⇔ ⌘J). Dismissal records for core chrome panes only exist as
+ * legacy state (they all register closers now), but they must not strand the
+ * pane where only a layout reset can recover it.
+ */
+function restoreDismissedSidePanes(side: TreeSide) {
+  const dismissed = $dismissedPanes.get()
+
+  if (dismissed.size === 0) {
+    return
+  }
+
+  let changed = false
+
+  for (const pane of registry.getArea('panes')) {
+    if (!dismissed.has(pane.id)) {
+      continue
+    }
+
+    const placement = (pane.data as { placement?: string } | undefined)?.placement
+    const paneSide = placement === 'left' ? 'left' : placement === 'main' ? null : 'right'
+
+    if (paneSide === side) {
+      setDismissed(pane.id, false)
+      changed = true
+    }
+  }
+
+  if (changed) {
+    adoptContributedPanes()
+  }
 }
 
 /** Bind a side's visibility to an app store (mirror of bindPaneVisibility). */
@@ -334,12 +376,12 @@ if (typeof window !== 'undefined') {
   query.addEventListener('change', event => $narrowViewport.set(event.matches))
 }
 
-/** The titlebar flip toggle: swap which side each root-level rail lives on. */
+/** The titlebar flip toggle (⌘\): mirror the whole layout left↔right. */
 export function mirrorLayoutTree() {
   const tree = $layoutTree.get()
 
   if (tree) {
-    commit(mirrorRootRow(tree))
+    commit(mirrorTreeHorizontal(tree))
   }
 }
 
@@ -503,12 +545,101 @@ function commit(next: LayoutNode | null) {
   persist(next)
 }
 
+// ---------------------------------------------------------------------------
+// USER-PLACED panes — "their spot wins". A pane the user has explicitly
+// dragged (zone move / span / zone-menu split) keeps that placement; auto-
+// docking (dockPaneBeside) only steers panes the user hasn't touched.
+// Presets and resets hand placement back to the app.
+// ---------------------------------------------------------------------------
+
+const USER_PLACED_KEY = 'hermes.desktop.userPlacedPanes.v1'
+
+export const $userPlacedPanes = atom<ReadonlySet<string>>(new Set(readJson<string[]>(USER_PLACED_KEY) ?? []))
+
+function saveUserPlaced(next: ReadonlySet<string>) {
+  $userPlacedPanes.set(next)
+  writeJson(USER_PLACED_KEY, next.size === 0 ? null : [...next])
+}
+
+function markPaneUserPlaced(paneId: string) {
+  const next = toggledSet($userPlacedPanes.get(), paneId, true)
+
+  if (next) {
+    saveUserPlaced(next)
+  }
+}
+
+/**
+ * Dock `paneId` directly beside `anchorPaneId` — the "preview opens NEXT TO
+ * the file tree" contract, position-aware: wherever the anchor lives (default
+ * rail, flipped via ⌘\, dragged into a stack, tabbed into main), the pane
+ * lands adjacent to it. Side rule: an anchor sitting right of the main zone
+ * gets the pane on its LEFT (the rail slides open toward the chat — main
+ * parity); an anchor left of main, stacked with it, or anywhere else gets it
+ * on the RIGHT. Skipped when the USER has placed the pane themselves, or the
+ * anchor isn't visible. Idempotent — a pane already beside its anchor is a
+ * shape no-op.
+ */
+export function dockPaneBeside(paneId: string, anchorPaneId: string) {
+  const tree = $layoutTree.get()
+
+  if (!tree || $userPlacedPanes.get().has(paneId)) {
+    return
+  }
+
+  const panes = registry.getArea('panes')
+  const anchor = findGroupOfPane(tree, anchorPaneId)
+
+  // Anchor must be a live, shown pane — never dock beside a hidden file tree.
+  if (!anchor || $hiddenTreePanes.get().has(anchorPaneId) || !panes.some(c => c.id === anchorPaneId)) {
+    return
+  }
+
+  // The uncloseable main workspace (session tiles are placement:'main' too,
+  // but closeable, so the uncloseable flag disambiguates).
+  const mainId = panes.find(c => {
+    const data = c.data as { placement?: string; uncloseable?: boolean } | undefined
+
+    return data?.placement === 'main' && data.uncloseable
+  })?.id
+
+  const order = allPaneIds(tree)
+
+  const anchorRightOfMain =
+    !!mainId && !anchor.panes.includes(mainId) && order.indexOf(anchorPaneId) > order.indexOf(mainId)
+
+  const pos: DropPosition = anchorRightOfMain ? 'left' : 'right'
+
+  // A dismissed pane re-enters HERE (beside the anchor), not via adoption's
+  // placement fallback — clear the record so the two never disagree.
+  if ($dismissedPanes.get().has(paneId)) {
+    setDismissed(paneId, false)
+  }
+
+  const next = findGroupOfPane(tree, paneId)
+    ? movePaneOp(tree, paneId, { groupId: anchor.id, pos })
+    : insertAtGroup(tree, anchor.id, paneId, pos)
+
+  if (next && next !== tree) {
+    commit(next)
+  }
+}
+
 export function moveTreePane(paneId: string, target: { groupId: string; pos: DropPosition }) {
   const tree = $layoutTree.get()
 
-  if (tree) {
-    commit(movePaneOp(tree, paneId, target))
+  if (!tree) {
+    return
+  }
+
+  const next = movePaneOp(tree, paneId, target)
+
+  // movePane returns the SAME root for no-op drops ("stays here") — only a
+  // real move customizes the preset or pins the pane as user-placed.
+  if (next !== tree) {
+    commit(next)
     markActivePreset('custom')
+    markPaneUserPlaced(paneId)
   }
 }
 
@@ -522,8 +653,10 @@ export function applyTree(tree: LayoutNode, presetId: string) {
   const previous = $layoutTree.get()
 
   // A preset defines the layout's SIZES too — stale drag overrides from the
-  // previous arrangement would distort it.
+  // previous arrangement would distort it. Same for user-placed pins: picking
+  // a layout hands pane placement back to the app (auto-docking resumes).
   clearAllPaneSizeOverrides()
+  saveUserPlaced(new Set())
   commit(previous ? adoptMissingPanes(tree, previous) : tree)
   markActivePreset(presetId)
 
@@ -562,6 +695,7 @@ export function mergeTreeZones(groupIds: string[], paneId: string, fallbackGroup
   if (merged) {
     commit(merged)
     markActivePreset('custom')
+    markPaneUserPlaced(paneId)
   } else if (fallbackGroupId) {
     moveTreePane(paneId, { groupId: fallbackGroupId, pos: 'center' })
   }
@@ -592,6 +726,7 @@ export function splitTreeZone(groupId: string, side: RootEdge, movePaneId: strin
   if (tree) {
     commit(splitGroupZoneOp(tree, groupId, side, movePaneId))
     markActivePreset('custom')
+    markPaneUserPlaced(movePaneId)
   }
 }
 
@@ -670,8 +805,10 @@ export function persistTree() {
 export function resetLayoutTree() {
   persist(null)
   clearAllPaneSizeOverrides()
-  // Reset restores EVERYTHING — closed panes included.
+  // Reset restores EVERYTHING — closed panes included — and hands pane
+  // placement back to the app (user-placed pins cleared).
   saveDismissed(new Set())
+  saveUserPlaced(new Set())
   $layoutTree.set(defaultTree)
   markActivePreset('default')
   // Plugin panes aren't in the declared default — re-adopt by placement.

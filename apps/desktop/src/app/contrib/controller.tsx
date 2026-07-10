@@ -12,6 +12,7 @@ import {
   $layoutTree,
   bindTreeSideVisibility,
   declareDefaultTree,
+  dockPaneBeside,
   mirrorLayoutTree,
   registerPaneCloser,
   registerPaneOpener,
@@ -78,9 +79,12 @@ registry.registerMany([
     area: 'panes',
     title: 'sessions',
     // Collapsible: leaves the grid on narrow viewports (edge overlay instead).
+    // dock: where a RE-ADOPTED pane lands (healed from a stale dismissal) —
+    // its default-ish spot beside main, not a random same-placement stack.
     data: {
       placement: 'left',
       collapsible: true,
+      dock: { pane: 'workspace', pos: 'left' },
       revealAliases: ['chat-sidebar'],
       width: `${SIDEBAR_DEFAULT_WIDTH}px`,
       minWidth: `${SIDEBAR_DEFAULT_WIDTH}px`,
@@ -111,9 +115,11 @@ registry.registerMany([
     id: 'files',
     area: 'panes',
     title: 'files',
+    // dock: re-adoption target after a stale dismissal (see sessions).
     data: {
       placement: 'right',
       collapsible: true,
+      dock: { pane: 'workspace', pos: 'right' },
       revealAliases: ['file-browser'],
       width: FILE_BROWSER_DEFAULT_WIDTH,
       minWidth: FILE_BROWSER_MIN_WIDTH,
@@ -127,9 +133,12 @@ registry.registerMany([
     title: 'preview',
     // The rail brings its OWN tab strip (per-target tabs with close buttons).
     // Exists only while something is previewed — visibility is bound to the
-    // preview targets below, like every other self-managed surface.
+    // preview targets below, like every other self-managed surface. dock:
+    // adoption seed only — dockPaneBeside re-docks it next to files on every
+    // reveal anyway (position-aware).
     data: {
       placement: 'right',
+      dock: { pane: 'files', pos: 'left' },
       width: 'clamp(18rem, 36vw, 32rem)',
       minWidth: PREVIEW_RAIL_MIN_WIDTH,
       maxWidth: PREVIEW_RAIL_MAX_WIDTH
@@ -242,10 +251,14 @@ registry.registerMany([
 // Layout presets — CHAT (main) always dominates.
 // ---------------------------------------------------------------------------
 
-// The REAL default: sessions left, chat main, and TWO right sidebars in the
-// app's column order (main | … | review | file-browser — files outermost).
-// Review only exists while ⌘G ($reviewOpen) has it visible; its zone
-// collapses to nothing otherwise.
+// The REAL default: sessions left, chat main, and the right sidebars in
+// column order main | … | review | preview | file-browser (files outermost,
+// preview DIRECTLY left of the file tree). Each is its OWN zone — main
+// parity: a file double-click slides the preview open as its own pane beside
+// the tree, never as a tab stacked into the files sidebar. Preview/review
+// zones collapse to nothing while their pane is hidden (no target / ⌘G off).
+// This static spot is just the seed — dockPaneBeside keeps preview adjacent
+// to files WHEREVER files moves (see the target listeners below).
 const DEFAULT_TREE = split(
   'row',
   [
@@ -256,8 +269,12 @@ const DEFAULT_TREE = split(
       [
         split(
           'row',
-          [group(['review'], { id: 'grp-review' }), group(['files', 'preview'], { id: 'grp-rail' })],
-          [1, 1.2],
+          [
+            group(['review'], { id: 'grp-review' }),
+            group(['preview'], { id: 'grp-preview' }),
+            group(['files'], { id: 'grp-files' })
+          ],
+          [1, 1, 1.2],
           'spl-rail'
         ),
         group(['terminal'], { id: 'grp-terminal' })
@@ -433,9 +450,24 @@ registry.register({
 // Sessions' visibility is the LEFT-side toggle's job — Close just collapses
 // the side (⌘B truthful, titlebar button flips back).
 registerPaneCloser('sessions', () => setSidebarOpen(false))
-// A NEW target while the pane is already visible still fronts it.
-$previewTarget.listen(target => target && revealTreePane('preview'))
-$filePreviewTarget.listen(target => target && revealTreePane('preview'))
+// Files mirrors it on the RIGHT: without a closer, its tab's Close falls into
+// the DISMISSED-pane path — removed from the tree and NOT recoverable from
+// the titlebar toggle (the pane just seems to vanish). Collapse the side
+// instead, ⌘J truthful.
+registerPaneCloser('files', () => setFileBrowserOpen(false))
+
+// A preview target lands NEXT TO the file tree — position-aware: wherever
+// files currently lives (default rail, ⌘\-flipped, dragged into a stack), the
+// preview zone docks directly beside it. A user who drags the preview pane
+// somewhere pins it there instead (until a preset/reset). Then reveal: open
+// the side, unhide, front — a NEW target while already visible still fronts.
+const revealPreview = () => {
+  dockPaneBeside('preview', 'files')
+  revealTreePane('preview')
+}
+
+$previewTarget.listen(target => target && revealPreview())
+$filePreviewTarget.listen(target => target && revealPreview())
 
 // ---------------------------------------------------------------------------
 

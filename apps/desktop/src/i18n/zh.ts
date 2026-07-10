@@ -2406,7 +2406,6 @@ export const zh: Translations = {
     hideHeader: '隐藏标题栏',
     minimize: '最小化',
     restore: '还原',
-    closeTab: label => `关闭 ${label}`,
     split: dir => `向${dir}拆分`,
     move: dir => `向${dir}移动`,
     dirUp: '上',

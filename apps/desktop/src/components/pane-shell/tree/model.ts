@@ -533,15 +533,23 @@ export function splitGroupZone(root: LayoutNode, groupId: string, side: RootEdge
   )
 }
 
-/** Mirror the layout horizontally (the titlebar flip toggle): reverse the
- *  root row split. Nested splits keep their internal order — flipping swaps
- *  which SIDE each rail lives on, not the rails' contents. */
-export function mirrorRootRow(root: LayoutNode): LayoutNode {
-  if (root.type !== 'split' || root.orientation !== 'row') {
+/** Mirror the layout HORIZONTALLY (the titlebar flip toggle / ⌘\): reverse
+ *  every ROW split's child order at EVERY depth, so left↔right flips
+ *  everywhere. A right rail lands on the left with its OWN internal order
+ *  mirrored too — so preview stays directly beside the file tree instead of
+ *  jumping to the far edge (a shallow root-only reverse left nested rails in
+ *  place). COLUMN splits keep their top↔bottom order (the terminal stays at
+ *  the bottom). Its own involution: flipping twice is the identity. */
+export function mirrorTreeHorizontal(root: LayoutNode): LayoutNode {
+  if (root.type === 'group') {
     return root
   }
 
-  return { ...root, children: [...root.children].reverse(), weights: [...root.weights].reverse() }
+  const children = root.children.map(mirrorTreeHorizontal)
+
+  return root.orientation === 'row'
+    ? { ...root, children: children.reverse(), weights: [...root.weights].reverse() }
+    : { ...root, children }
 }
 
 export function setSplitWeights(root: LayoutNode, splitId: string, weights: number[]): LayoutNode {

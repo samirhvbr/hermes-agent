@@ -16,7 +16,7 @@ import { Codicon } from '@/components/ui/codicon'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { DecodeText } from '@/components/ui/decode-text'
 import { DROP_SHEET_BLUR_CLASS, DROP_SHEET_CLASS, DropPill } from '@/components/ui/drop-affordance'
-import { PaneTab, PaneTabLabel } from '@/components/ui/pane-tab'
+import { PANE_TAB_STRIP_LINE, PaneTab, PaneTabLabel } from '@/components/ui/pane-tab'
 import { ContribBoundary } from '@/contrib/react/boundary'
 import { useContributions } from '@/contrib/react/use-contributions'
 import { useI18n } from '@/i18n'
@@ -269,13 +269,13 @@ export function TreeGroup({ node }: { node: GroupNode }) {
       {headerVisible && (
         <ZoneMenu {...zoneMenu}>
           <div
-            // Zone panes (files/review/terminal/…) all sit on the sidebar
-            // surface tone, so the active tab takes that bg and merges into the
-            // body below (the white delta is the file-preview rail, which keeps
-            // its own fallback). The strip uses PaneTab's inactive mix — the
-            // surface pushed toward the foreground (VS Code's tab delta, works
-            // in both modes) — so the active tab still reads as a tab.
-            className="group/pane-header flex h-7 shrink-0 select-none bg-[color-mix(in_srgb,var(--pane-tab-active-bg)_92%,var(--ui-base))] [-webkit-app-region:no-drag] [--pane-tab-active-bg:var(--ui-sidebar-surface-background)]"
+            // Active = sidebar surface (merges into body). Strip =
+            // `--theme-card-seed` (VS Code `tab.inactiveBackground`). Line =
+            // PANE_TAB_STRIP_LINE; active tab cuts through it.
+            className={cn(
+              'group/pane-header flex h-7 shrink-0 select-none bg-(--pane-tab-strip-bg) [-webkit-app-region:no-drag] [--pane-tab-active-bg:var(--ui-sidebar-surface-background)] [--pane-tab-strip-bg:var(--theme-card-seed)]',
+              PANE_TAB_STRIP_LINE
+            )}
             onContextMenu={e => {
               menuPaneRef.current =
                 (e.target as HTMLElement).closest('[data-tree-tab]')?.getAttribute('data-tree-tab') ?? undefined
@@ -308,7 +308,6 @@ export function TreeGroup({ node }: { node: GroupNode }) {
                   <PaneTab
                     active={isActive}
                     aria-selected={isActive}
-                    closeLabel={closeable ? t.zones.closeTab(title) : undefined}
                     data-tree-tab={paneId}
                     key={paneId}
                     onClose={closeable ? () => closeTreePane(paneId) : undefined}
