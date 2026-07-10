@@ -22,8 +22,10 @@ export interface PaneMirror<T> {
   key: (tile: T) => string
   /** Pane-id namespace — the id is `${prefix}:${key}`. */
   prefix: string
-  /** Edge to dock against main on adoption (default right). */
+  /** Edge to dock against on adoption (default right). */
   dir?: (tile: T) => SplitDir | undefined
+  /** Pane to dock against (default `workspace`) — a drop's target zone. */
+  anchor?: (tile: T) => string | undefined
   minWidth: string
   title: (key: string) => string
   render: (key: string) => ReactNode
@@ -55,7 +57,11 @@ export function paneMirror<T>(cfg: PaneMirror<T>): () => void {
         id: paneId(key),
         area: 'panes',
         title,
-        data: { dock: { pane: 'workspace', pos: cfg.dir?.(tile) ?? 'right' }, minWidth: cfg.minWidth, placement: 'main' },
+        data: {
+          dock: { pane: cfg.anchor?.(tile) ?? 'workspace', pos: cfg.dir?.(tile) ?? 'right' },
+          minWidth: cfg.minWidth,
+          placement: 'main'
+        },
         render: () => cfg.render(key)
       })
 

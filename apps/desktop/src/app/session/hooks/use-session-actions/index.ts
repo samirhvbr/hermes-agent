@@ -41,7 +41,7 @@ import {
   setYoloActive,
   workspaceCwdForNewSession
 } from '@/store/session'
-import { dropSessionState, publishSessionState } from '@/store/session-states'
+import { closeSessionTile, dropSessionState, publishSessionState } from '@/store/session-states'
 import { broadcastSessionsChanged } from '@/store/session-sync'
 import { isWatchWindow } from '@/store/windows'
 import type { SessionCreateResponse, SessionResumeResponse, UsageStats } from '@/types/hermes'
@@ -836,6 +836,18 @@ export function useSessionActions({
         if (closingRuntimeId) {
           clearQueuedPrompts(closingRuntimeId)
         }
+
+        // A tiled copy of this session must not outlive it: collapse the pane
+        // and evict its mirrored runtime state so nothing submits to (or renders)
+        // a deleted session.
+        const tiledRuntimeId = runtimeIdByStoredSessionIdRef.current.get(storedSessionId)
+        closeSessionTile(storedSessionId)
+
+        if (tiledRuntimeId) {
+          runtimeIdByStoredSessionIdRef.current.delete(storedSessionId)
+          sessionStateByRuntimeIdRef.current.delete(tiledRuntimeId)
+          dropSessionState(tiledRuntimeId)
+        }
       } catch (err) {
         if (removed) {
           setSessions(prev => [removed, ...prev])
@@ -873,8 +885,10 @@ export function useSessionActions({
       copy,
       navigate,
       requestGateway,
+      runtimeIdByStoredSessionIdRef,
       selectedStoredSessionId,
       selectedStoredSessionIdRef,
+      sessionStateByRuntimeIdRef,
       startFreshSessionDraft
     ]
   )
@@ -911,6 +925,16 @@ export function useSessionActions({
         // not appear to do nothing until the next full refresh.
         setSessions(prev => prev.filter(session => !sessionMatchesStoredId(session, storedSessionId)))
         $pinnedSessionIds.set($pinnedSessionIds.get().filter(id => id !== storedSessionId && id !== archivedPinId))
+        // An archived session is hidden from the sidebar; its tile must go too.
+        const tiledRuntimeId = runtimeIdByStoredSessionIdRef.current.get(storedSessionId)
+        closeSessionTile(storedSessionId)
+
+        if (tiledRuntimeId) {
+          runtimeIdByStoredSessionIdRef.current.delete(storedSessionId)
+          sessionStateByRuntimeIdRef.current.delete(tiledRuntimeId)
+          dropSessionState(tiledRuntimeId)
+        }
+
         notify({ durationMs: 2_000, kind: 'success', message: copy.archived })
       } catch (err) {
         if (archived) {
@@ -923,7 +947,13 @@ export function useSessionActions({
         notifyError(err, copy.archiveFailed)
       }
     },
-    [copy, selectedStoredSessionId, startFreshSessionDraft]
+    [
+      copy,
+      runtimeIdByStoredSessionIdRef,
+      selectedStoredSessionId,
+      sessionStateByRuntimeIdRef,
+      startFreshSessionDraft
+    ]
   )
 
   return {

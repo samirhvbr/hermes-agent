@@ -21,6 +21,8 @@ import { atom } from 'nanostores'
 import type { ClientSessionState } from '@/app/types'
 import { readJson, writeJson } from '@/lib/storage'
 
+import { $activeProfile, normalizeProfileKey } from './profile'
+
 // ---------------------------------------------------------------------------
 // Reactive per-runtime session state (view mirror of the wiring cache).
 // ---------------------------------------------------------------------------
@@ -51,39 +53,112 @@ export function dropSessionState(runtimeId: string) {
  *  session tiles and route (page) tiles. */
 export type SplitDir = 'bottom' | 'left' | 'right' | 'top'
 
+
 export interface SessionTile {
   /** Stored session id — the durable identity (runtime ids are ephemeral). */
   storedSessionId: string
-  /** Edge to dock against main on adoption (default right). */
+  /** Edge to dock against `anchor` on adoption (default right). */
   dir?: SplitDir
+  /** Pane to dock against (a drop's target zone) — default the workspace.
+   *  In-memory only: after first adoption the tree remembers placement. */
+  anchor?: string
   /** Live runtime id once the tile's resume has bound one. */
   runtimeId?: string
   /** Resume failed terminally (shown in the tile; retryable). */
   error?: string
 }
 
-const TILES_KEY = 'hermes.desktop.sessionTiles.v1'
+// Tiles are persisted PER PROFILE: a session belongs to one profile, and the
+// single live gateway is scoped to one profile at a time, so a tile only makes
+// sense while its profile is active. Switching profiles swaps the visible set
+// (and drops runtime bindings so each tile re-resumes against the now-current
+// gateway — which also settles the "tile resumes against the wrong backend" and
+// "stale runtime after respawn" bugs by construction).
+const TILES_KEY = 'hermes.desktop.sessionTiles.v2'
+const LEGACY_TILES_KEY = 'hermes.desktop.sessionTiles.v1'
 
-function loadTiles(): SessionTile[] {
-  const parsed = readJson<unknown>(TILES_KEY)
+type StoredTile = Pick<SessionTile, 'dir' | 'storedSessionId'>
 
-  // Runtime ids are process-scoped — never trust a persisted one.
-  return Array.isArray(parsed)
-    ? parsed
+const toStored = (t: SessionTile): StoredTile => ({ dir: t.dir, storedSessionId: t.storedSessionId })
+
+function parseTileList(value: unknown): StoredTile[] {
+  return Array.isArray(value)
+    ? value
         .filter((t): t is SessionTile => Boolean(t && typeof (t as SessionTile).storedSessionId === 'string'))
-        .map(t => ({ dir: t.dir, storedSessionId: t.storedSessionId }))
+        .map(toStored)
     : []
 }
 
-export const $sessionTiles = atom<SessionTile[]>(loadTiles())
+function loadTilesByProfile(): Record<string, StoredTile[]> {
+  const byProfile: Record<string, StoredTile[]> = {}
+  const parsed = readJson<unknown>(TILES_KEY)
+
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    for (const [profile, list] of Object.entries(parsed as Record<string, unknown>)) {
+      const tiles = parseTileList(list)
+
+      if (tiles.length > 0) {
+        byProfile[normalizeProfileKey(profile)] = tiles
+      }
+    }
+  }
+
+  // Migrate a v1 flat list into the default profile, then retire the key.
+  const legacy = parseTileList(readJson<unknown>(LEGACY_TILES_KEY))
+
+  if (legacy.length > 0) {
+    const key = normalizeProfileKey('default')
+    byProfile[key] = [...(byProfile[key] ?? []), ...legacy]
+  }
+
+  writeJson(LEGACY_TILES_KEY, null)
+
+  return byProfile
+}
+
+const tilesByProfile = loadTilesByProfile()
+const profileKey = () => normalizeProfileKey($activeProfile.get())
+
+// Runtime ids are process-scoped — never trust a persisted one, so the live
+// atom hydrates from the stored (runtime-less) tiles for the active profile.
+export const $sessionTiles = atom<SessionTile[]>([...(tilesByProfile[profileKey()] ?? [])])
+
+function persistTiles() {
+  writeJson(TILES_KEY, Object.keys(tilesByProfile).length === 0 ? null : tilesByProfile)
+}
 
 function saveTiles(tiles: SessionTile[]) {
   $sessionTiles.set(tiles)
-  writeJson(TILES_KEY, tiles.length === 0 ? null : tiles.map(t => ({ dir: t.dir, storedSessionId: t.storedSessionId })))
+  const stored = tiles.map(toStored)
+
+  if (stored.length > 0) {
+    tilesByProfile[profileKey()] = stored
+  } else {
+    delete tilesByProfile[profileKey()]
+  }
+
+  persistTiles()
 }
+
+// Profile switch: surface the new profile's tiles with runtime ids cleared so
+// they re-resume against the now-current gateway. (Fires immediately on
+// subscribe; harmless — the init value already matches.)
+$activeProfile.subscribe(() => {
+  $sessionTiles.set([...(tilesByProfile[profileKey()] ?? [])])
+})
 
 export function patchSessionTile(storedSessionId: string, patch: Partial<SessionTile>) {
   saveTiles($sessionTiles.get().map(t => (t.storedSessionId === storedSessionId ? { ...t, ...patch } : t)))
+}
+
+/** Drop live runtime bindings so every tile re-resumes — used on gateway
+ *  reconnect, where a respawned backend re-mints (recycles) runtime ids. */
+export function resetTileRuntimeBindings() {
+  const tiles = $sessionTiles.get()
+
+  if (tiles.some(t => t.runtimeId)) {
+    $sessionTiles.set(tiles.map(toStored))
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -120,11 +195,11 @@ export function sessionTileDelegate(): SessionTileDelegate | null {
 
 /** Open (or front) a tile for a stored session, docked on `dir` (default
  *  right). Idempotent — an already-open tile keeps its original edge. */
-export function openSessionTile(storedSessionId: string, dir: SplitDir = 'right') {
+export function openSessionTile(storedSessionId: string, dir: SplitDir = 'right', anchor?: string) {
   const tiles = $sessionTiles.get()
 
   if (!tiles.some(t => t.storedSessionId === storedSessionId)) {
-    saveTiles([...tiles, { dir, storedSessionId }])
+    saveTiles([...tiles, { anchor, dir, storedSessionId }])
   }
 }
 

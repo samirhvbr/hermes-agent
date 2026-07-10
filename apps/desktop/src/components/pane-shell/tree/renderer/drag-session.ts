@@ -25,12 +25,13 @@ import { type EngineZone, HighlightedZones, primaryZone } from '../zones-engine'
 
 const DRAG_THRESHOLD_PX = 4
 
-/** Pointer within this normalized band of a zone edge targets a SPLIT drop
- *  (the coarse gesture — fling toward a side). The arrow chips near the badge
- *  are the precise targets and win over the band. */
-const EDGE_BAND = 0.2
+/** Normalized radius of the elliptical CENTER region (stack/link). Outside it
+ *  the drop targets the dominant-axis edge — the boundary curves with the
+ *  zone's aspect ratio instead of snapping at a rigid pixel band, and corners
+ *  ease into their nearest edge along the quadrant diagonals. */
+const CENTER_RADIUS = 0.62
 
-function snapshotZones(): EngineZone[] {
+export function snapshotZones(): EngineZone[] {
   return [...document.querySelectorAll<HTMLElement>('[data-tree-group]')].map(el => {
     const r = el.getBoundingClientRect()
 
@@ -38,36 +39,32 @@ function snapshotZones(): EngineZone[] {
   })
 }
 
-/** Sub-zone drop position: an arrow chip under the pointer wins (precise),
- *  else the dominant edge band (coarse), else center = stack. */
-function subZonePosition(zones: EngineZone[], groupId: string, x: number, y: number): DropPosition {
-  const chip = document
-    .elementsFromPoint(x, y)
-    .find((el): el is HTMLElement => el instanceof HTMLElement && Boolean(el.dataset.dropPos))
+/** Radial drop position within `rect`: inside the center ellipse = the center
+ *  action (stack/link); outside, the dominant axis picks the edge (VS Code
+ *  dock-preview geometry). `centerRadius` sizes the ellipse — larger = more
+ *  center, slimmer curved edge bands. */
+export function radialPosition(
+  rect: { left: number; top: number; right: number; bottom: number },
+  x: number,
+  y: number,
+  centerRadius = CENTER_RADIUS
+): DropPosition {
+  // Zone-centered coordinates, ±1 at the edge midpoints.
+  const dx = ((x - rect.left) / Math.max(1, rect.right - rect.left)) * 2 - 1
+  const dy = ((y - rect.top) / Math.max(1, rect.bottom - rect.top)) * 2 - 1
 
-  if (chip) {
-    return chip.dataset.dropPos as DropPosition
-  }
-
-  const rect = zones.find(zone => zone.id === groupId)?.rect
-
-  if (!rect) {
+  if (Math.hypot(dx, dy) < centerRadius) {
     return 'center'
   }
 
-  const rx = (x - rect.left) / Math.max(1, rect.right - rect.left)
-  const ry = (y - rect.top) / Math.max(1, rect.bottom - rect.top)
+  return Math.abs(dx) >= Math.abs(dy) ? (dx < 0 ? 'left' : 'right') : (dy < 0 ? 'top' : 'bottom')
+}
 
-  const edges: [DropPosition, number][] = [
-    ['left', rx],
-    ['right', 1 - rx],
-    ['top', ry],
-    ['bottom', 1 - ry]
-  ]
+/** Sub-zone drop position within the zone `groupId` (radial hit-testing). */
+export function subZonePosition(zones: EngineZone[], groupId: string, x: number, y: number): DropPosition {
+  const rect = zones.find(zone => zone.id === groupId)?.rect
 
-  const [pos, depth] = edges.reduce((a, b) => (b[1] < a[1] ? b : a))
-
-  return depth < EDGE_BAND ? pos : 'center'
+  return rect ? radialPosition(rect, x, y) : 'center'
 }
 
 const sameHint = (a: DropHint | null, b: DropHint | null) =>
@@ -310,7 +307,7 @@ export function startPaneDrag(
     }
 
     // The hint updates on highlight-set changes AND on sub-zone position
-    // changes (arrow chips / edge bands within the same primary zone).
+    // changes (center/edge regions within the same primary zone).
     highlighted.update(zones, lastPoint, ev.shiftKey)
     let groupIds = [...highlighted.zones()]
 

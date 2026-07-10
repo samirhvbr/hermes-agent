@@ -9,6 +9,7 @@ import { atom } from 'nanostores'
 import { SIDEBAR_COLLAPSE_MEDIA_QUERY } from '@/app/layout-constants'
 import { setPluginEnabled } from '@/contrib/plugins-store'
 import { registry } from '@/contrib/registry'
+import { translateNow } from '@/i18n'
 import { readJson, readKey, writeJson, writeKey } from '@/lib/storage'
 import { notify } from '@/store/notifications'
 import { clearAllPaneSizeOverrides } from '@/store/panes'
@@ -69,8 +70,14 @@ export function markActivePreset(id: string) {
   writeKey('hermes.desktop.layoutPreset.active', id)
 }
 
-/** Pane id being dragged (tree drag session), null when idle. */
+/** Pane id being dragged (tree drag session), null when idle. Also set to the
+ *  SESSION_TILE_DRAG sentinel while a sidebar session is dragged over the tree,
+ *  so the SAME zone overlay lights up (see session-tile-drop-bridge). */
 export const $treeDragging = atom<string | null>(null)
+
+/** Sentinel `$treeDragging` value for a session (not a pane) drag — the zone
+ *  overlay renders its normal targets, scoped to session-hosting zones. */
+export const SESSION_TILE_DRAG = '__session-tile-drag__'
 
 /**
  * Panes hidden by app chrome toggles (titlebar sidebar / right-sidebar
@@ -194,8 +201,8 @@ export function closeTreePane(paneId: string) {
     void setPluginEnabled(pluginId, false)
     notify({
       kind: 'info',
-      title: `Plugin "${pluginId}" disabled`,
-      message: 'Re-enable it in Settings → Plugins to bring the pane back.'
+      title: translateNow('zones.pluginDisabled', pluginId),
+      message: translateNow('zones.pluginDisabledBody')
     })
 
     return

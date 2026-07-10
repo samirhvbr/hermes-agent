@@ -223,6 +223,7 @@ export const watchSessionTiles = paneMirror<SessionTile>({
   key: t => t.storedSessionId,
   prefix: 'session-tile',
   dir: t => t.dir,
+  anchor: t => t.anchor,
   minWidth: '20rem',
   title: tileTitle,
   render: storedSessionId => <SessionTilePane storedSessionId={storedSessionId} />,

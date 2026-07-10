@@ -140,6 +140,9 @@ export function SidebarSessionRow({
             return
           }
 
+          // The tiling bridge + link overlay detect the drag from the MIME
+          // type alone (readable during dragover) — no store writes here: a
+          // synchronous store→render during dragstart can cancel native drags.
           writeSessionDrag(event.dataTransfer, {
             id: session.id,
             profile: session.profile || 'default',

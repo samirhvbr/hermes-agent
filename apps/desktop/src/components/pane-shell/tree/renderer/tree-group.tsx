@@ -10,13 +10,16 @@
  */
 
 import { useStore } from '@nanostores/react'
-import { type MouseEvent as ReactMouseEvent, type ReactNode, useRef } from 'react'
+import { type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode, useRef } from 'react'
 
 import { Codicon } from '@/components/ui/codicon'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { DecodeText } from '@/components/ui/decode-text'
+import { DROP_SHEET_BLUR_CLASS, DROP_SHEET_CLASS, DropPill } from '@/components/ui/drop-affordance'
+import { PaneTab, PaneTabLabel } from '@/components/ui/pane-tab'
 import { ContribBoundary } from '@/contrib/react/boundary'
 import { useContributions } from '@/contrib/react/use-contributions'
+import { useI18n } from '@/i18n'
 import { cn } from '@/lib/utils'
 
 import { $layoutEditMode } from '../../edit-mode'
@@ -32,6 +35,7 @@ import {
   activateTreePane,
   closeTreePane,
   moveTreePane,
+  SESSION_TILE_DRAG,
   setTreeGroupHeaderHidden,
   splitTreeZone,
   toggleTreeGroupMinimized
@@ -49,7 +53,6 @@ interface ZoneMenuDirection {
 }
 
 const DIRECTION_ORDER: readonly RootEdge[] = ['right', 'bottom', 'left', 'top']
-const DIRECTION_WORD: Record<RootEdge, string> = { bottom: 'down', left: 'left', right: 'right', top: 'up' }
 const DIRECTION_ARROW: Record<RootEdge, string> = { bottom: '↓', left: '←', right: '→', top: '↑' }
 
 /** Right-click zone menu: directional actions + header toggle + minimize.
@@ -75,6 +78,8 @@ function ZoneMenu({
   minimized?: boolean
   nodeId: string
 }) {
+  const { t } = useI18n()
+
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
@@ -85,10 +90,10 @@ function ZoneMenu({
           </ContextMenuItem>
         ))}
         <ContextMenuItem onSelect={() => setTreeGroupHeaderHidden(nodeId, !headerHidden)}>
-          {headerHidden ? 'Show header' : 'Hide header'}
+          {headerHidden ? t.zones.showHeader : t.zones.hideHeader}
         </ContextMenuItem>
         <ContextMenuItem onSelect={() => toggleTreeGroupMinimized(nodeId, !minimized)}>
-          {minimized ? 'Restore' : 'Minimize'}
+          {minimized ? t.zones.restore : t.zones.minimize}
         </ContextMenuItem>
         {/* Resolved at render: the menu mounts on open, after the right-click
             set menuPaneRef — so an uncloseable target hides the item instead
@@ -103,7 +108,7 @@ function ZoneMenu({
               }
             }}
           >
-            Close
+            {t.common.close}
           </ContextMenuItem>
         )}
       </ContextMenuContent>
@@ -112,6 +117,7 @@ function ZoneMenu({
 }
 
 export function TreeGroup({ node }: { node: GroupNode }) {
+  const { t } = useI18n()
   const ref = useRef<HTMLDivElement>(null)
   const stripRef = useRef<HTMLDivElement>(null)
   // The chip under the last right-click — the pane the zone menu's Split
@@ -143,10 +149,19 @@ export function TreeGroup({ node }: { node: GroupNode }) {
 
   // ONE header style: the app's compact pane-header. DEFAULT is contextual —
   // a single pane isn't a "tab", so its header auto-hides; a stack shows its
-  // chips. Double-click the zone toggles it either way (explicit choice wins
-  // over the default — that's how you summon a lone pane's chip to drag it).
-  // A minimized group always shows its header — the group IS the header.
-  const headerHidden = node.headerHidden ?? shown.length <= 1
+  // chips. EXCEPTION: a lone TILE (closeable, placement 'main' — a session/page
+  // split) always shows its header, so it has a tab + close X — a tile in its
+  // own zone was otherwise unclosable (the "3rd tile has no tab" trap). Chrome
+  // panes (sessions/files/terminal…) and the uncloseable workspace keep the
+  // clean no-tab default. Double-click toggles it either way; a minimized
+  // group always shows its header (it IS the header).
+  const hasLoneTile = shown.some(id => {
+    const chrome = paneChrome(paneFor(id))
+
+    return !chrome.uncloseable && chrome.placement === 'main'
+  })
+
+  const headerHidden = node.headerHidden ?? (shown.length <= 1 && !hasLoneTile)
   const headerVisible = !isEmpty && (Boolean(node.minimized) || !headerHidden)
 
   // Drag handles preventDefault pointerdown (no native dblclick), so the
@@ -158,6 +173,13 @@ export function TreeGroup({ node }: { node: GroupNode }) {
       toggleTreeGroupMinimized(node.id, false)
       setTreeGroupHeaderHidden(node.id, true)
     }
+  }
+
+  const dirWord: Record<RootEdge, string> = {
+    bottom: t.zones.dirDown,
+    left: t.zones.dirLeft,
+    right: t.zones.dirRight,
+    top: t.zones.dirUp
   }
 
   // Zone-menu directions, contextual to this group's state:
@@ -172,7 +194,7 @@ export function TreeGroup({ node }: { node: GroupNode }) {
     shown.length > 1
       ? DIRECTION_ORDER.map(side => ({
           side,
-          label: `Split ${DIRECTION_WORD[side]} ${DIRECTION_ARROW[side]}`,
+          label: `${t.zones.split(dirWord[side])} ${DIRECTION_ARROW[side]}`,
           run: () => splitTreeZone(node.id, side, menuPaneRef.current ?? activeId)
         }))
       : DIRECTION_ORDER.flatMap(side => {
@@ -185,7 +207,7 @@ export function TreeGroup({ node }: { node: GroupNode }) {
           return [
             {
               side,
-              label: `Move ${DIRECTION_WORD[side]} ${DIRECTION_ARROW[side]}`,
+              label: `${t.zones.move(dirWord[side])} ${DIRECTION_ARROW[side]}`,
               run: () => moveTreePane(activeId, { groupId: neighbor.id, pos: 'center' })
             }
           ]
@@ -228,6 +250,9 @@ export function TreeGroup({ node }: { node: GroupNode }) {
     <div
       className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-(--ui-bg-editor)"
       data-tree-group={node.id}
+      // Advertises the visible tab strip so panes can drop their own
+      // self-naming labels (see [data-pane-self-label] in styles.css).
+      data-zone-header={headerVisible || undefined}
       onDoubleClick={onZoneDoubleClick}
       ref={ref}
       style={wcOverlap ? { paddingTop: wcOverlap.y + wcOverlap.height } : undefined}
@@ -240,13 +265,17 @@ export function TreeGroup({ node }: { node: GroupNode }) {
         />
       )}
 
-      {/* Header: ONE style — the small round chips (terminal-rail tab style),
-          whether the group holds one pane or a stack. Double-click hides the
-          header entirely. */}
+      {/* Header: the file-preview tab strip (PaneTab), one shared component. */}
       {headerVisible && (
         <ZoneMenu {...zoneMenu}>
           <div
-            className="group/pane-header flex h-7 shrink-0 select-none items-center gap-1 border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background) px-2 [-webkit-app-region:no-drag]"
+            // Zone panes (files/review/terminal/…) all sit on the sidebar
+            // surface tone, so the active tab takes that bg and merges into the
+            // body below (the white delta is the file-preview rail, which keeps
+            // its own fallback). The strip uses PaneTab's inactive mix — the
+            // surface pushed toward the foreground (VS Code's tab delta, works
+            // in both modes) — so the active tab still reads as a tab.
+            className="group/pane-header flex h-7 shrink-0 select-none bg-[color-mix(in_srgb,var(--pane-tab-active-bg)_92%,var(--ui-base))] [-webkit-app-region:no-drag] [--pane-tab-active-bg:var(--ui-sidebar-surface-background)]"
             onContextMenu={e => {
               menuPaneRef.current =
                 (e.target as HTMLElement).closest('[data-tree-tab]')?.getAttribute('data-tree-tab') ?? undefined
@@ -267,31 +296,30 @@ export function TreeGroup({ node }: { node: GroupNode }) {
             style={{ cursor: 'grab' }}
           >
             <div
-              className="flex min-w-0 items-center gap-0.5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
               role="tablist"
             >
               {shown.map(paneId => {
                 const isActive = paneId === activeId && !node.minimized
+                const closeable = !paneChrome(paneFor(paneId)).uncloseable
+                const title = paneFor(paneId)?.title ?? paneId
 
                 return (
-                  <span
+                  <PaneTab
+                    active={isActive}
                     aria-selected={isActive}
-                    className={cn(
-                      'flex h-[1.375rem] shrink-0 cursor-grab items-center rounded-md px-2 text-[0.6875rem] font-medium transition-colors',
-                      isActive
-                        ? 'bg-(--chrome-action-hover) text-foreground'
-                        : 'text-(--ui-text-tertiary) hover:bg-(--chrome-action-hover) hover:text-foreground'
-                    )}
+                    closeLabel={closeable ? t.zones.closeTab(title) : undefined}
                     data-tree-tab={paneId}
                     key={paneId}
+                    onClose={closeable ? () => closeTreePane(paneId) : undefined}
                     onPointerDown={e =>
                       startPaneDrag(
                         paneId,
                         e,
                         () => {
-                          // Chips ACTIVATE (restoring a collapsed group).
+                          // Tabs ACTIVATE (restoring a collapsed group).
                           // Minimize lives on the chevron / single-pane label
-                          // — overloading the active chip made double-click a
+                          // — overloading the active tab made double-click a
                           // minimize/restore/hide lottery.
                           if (node.minimized) {
                             toggleTreeGroupMinimized(node.id, false)
@@ -304,16 +332,16 @@ export function TreeGroup({ node }: { node: GroupNode }) {
                       )
                     }
                     role="tab"
+                    style={{ cursor: 'grab' }}
                   >
-                    <span className="max-w-32 truncate">{paneFor(paneId)?.title ?? paneId}</span>
-                  </span>
+                    <PaneTabLabel>{title}</PaneTabLabel>
+                  </PaneTab>
                 )
               })}
             </div>
-            <span className="ml-auto" />
             <button
-              aria-label={node.minimized ? 'Restore' : 'Minimize'}
-              className="grid size-5 shrink-0 place-items-center rounded-md text-(--ui-text-tertiary) opacity-0 transition-opacity hover:bg-(--ui-control-hover-background) hover:text-foreground focus-visible:opacity-100 group-hover/pane-header:opacity-100"
+              aria-label={node.minimized ? t.zones.restore : t.zones.minimize}
+              className="mx-1 grid size-5 shrink-0 place-items-center self-center rounded-md text-(--ui-text-tertiary) opacity-0 transition-opacity hover:bg-(--ui-control-hover-background) hover:text-foreground focus-visible:opacity-100 group-hover/pane-header:opacity-100"
               onClick={() => toggleTreeGroupMinimized(node.id, !node.minimized)}
               onPointerDown={e => e.stopPropagation()}
               type="button"
@@ -335,7 +363,7 @@ export function TreeGroup({ node }: { node: GroupNode }) {
           ) : active?.render ? (
             <ContribBoundary id={active.id}>{active.render()}</ContribBoundary>
           ) : (
-            <div className="p-3 font-mono text-[11px] text-(--ui-text-quaternary)">missing pane: {activeId}</div>
+            <div className="p-3 font-mono text-[11px] text-(--ui-text-quaternary)">{t.zones.missingPane(activeId)}</div>
           )}
         </div>
       )}
@@ -376,22 +404,57 @@ export function TreeGroup({ node }: { node: GroupNode }) {
   )
 }
 
+// ---------------------------------------------------------------------------
+// FancyZones drop overlay
+// ---------------------------------------------------------------------------
+
+/** Sheet inset from the zone edge (px). */
+const REGION_PAD = 6
+
+/** The sheet's box per drop position — longhand insets so CSS transitions can
+ *  interpolate the px↔% change: the target GLIDES between the full zone and
+ *  the hovered half instead of snapping (VS Code dock preview). */
+const REGION: Record<DropPosition, CSSProperties> = {
+  bottom: { bottom: REGION_PAD, left: REGION_PAD, right: REGION_PAD, top: '50%' },
+  center: { bottom: REGION_PAD, left: REGION_PAD, right: REGION_PAD, top: REGION_PAD },
+  left: { bottom: REGION_PAD, left: REGION_PAD, right: '50%', top: REGION_PAD },
+  right: { bottom: REGION_PAD, left: '50%', right: REGION_PAD, top: REGION_PAD },
+  top: { bottom: '50%', left: REGION_PAD, right: REGION_PAD, top: REGION_PAD }
+}
+
+const EDGE_ARROW: Record<Exclude<DropPosition, 'center'>, string> = {
+  bottom: 'arrow-down',
+  left: 'arrow-left',
+  right: 'arrow-right',
+  top: 'arrow-up'
+}
+
 /**
  * The FancyZones drop overlay for one zone. Split out of TreeGroup so the
  * per-pointermove `$dropHint` churn re-renders only this lightweight node —
  * the zone's header, body, and menu-direction walk stay put during a drag.
  *
- * ZonesOverlay semantics: every eligible zone shows the inactive fill, the
- * highlighted set gets the highlight fill at highlightOpacity (50%), all fading
- * in on the 200ms alpha ramp. The PRIMARY zone also offers directional targets
- * (VS Code editor-drop style): hover/drop an arrow chip — or fling into an edge
- * band — to SPLIT that side instead of stacking.
+ * ONE dashed sheet per zone, in the attachment dropzone's design language
+ * (DROP_SHEET_CLASS + DropPill — the composer drop and the zone targets speak
+ * identically): a quiet outline over every eligible zone, accent-lit over the
+ * target, morphing to the hovered half for an edge split. The pill names the
+ * outcome; edges get their arrow.
  */
 function ZoneDropOverlay({ isEmpty, node }: { isEmpty: boolean; node: GroupNode }) {
+  const { t } = useI18n()
   const dragging = useStore($treeDragging)
   const hint = useStore($dropHint)
 
   if (dragging === null) {
+    return null
+  }
+
+  // A session drag (sidebar row) reuses this exact overlay, but only over
+  // zones that host a chat surface — a session never lands next to the sidebar
+  // or terminal.
+  const sessionDrag = dragging === SESSION_TILE_DRAG
+
+  if (sessionDrag && !node.panes.some(p => p === 'workspace' || p.startsWith('session-tile:'))) {
     return null
   }
 
@@ -402,107 +465,52 @@ function ZoneDropOverlay({ isEmpty, node }: { isEmpty: boolean; node: GroupNode 
     return null
   }
 
-  const highlightedZone = hint?.groupIds?.includes(node.id) ?? false
   const primary = hint?.groupId === node.id
+  const active = hint?.groupIds?.includes(node.id) ?? false
+  const multi = (hint?.groupIds?.length ?? 0) > 1
+  // Sub-positions only exist for a single-zone target (a Shift-span merges).
+  const pos = primary && !multi ? (hint?.pos ?? 'center') : 'center'
+  // Session drag over a zone's CENTER: the "link to chat" overlay inside the
+  // surface (ChatDropOverlay — the same sheet + pill) owns that region; this
+  // sheet fades out so the two never stack. Edges behave exactly like a tab.
+  const centerLink = sessionDrag && primary && pos === 'center'
+
+  const pill =
+    !primary || centerLink
+      ? null
+      : multi
+        ? { icon: 'combine', label: t.zones.spanHere }
+        : pos !== 'center'
+          ? { icon: EDGE_ARROW[pos], label: sessionDrag ? t.zones.openHere : t.zones.splitHere }
+          : isDragSource
+            ? { icon: 'discard', label: t.zones.staysHere }
+            : { icon: 'layers', label: isEmpty ? t.zones.moveHere : t.zones.stackHere }
 
   return (
     <div
-      className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center rounded-[3px] border transition-colors duration-75"
-      style={{
-        animation: `hermes-zone-fade ${FADE_IN_DURATION_MILLIS}ms linear both`,
-        // Grounded on the chrome bg so the inactive fill actually dims
-        // content on dark themes (a bare 10% accent wash disappears there).
-        background: highlightedZone
-          ? 'color-mix(in srgb, var(--ui-accent) 50%, transparent)'
-          : 'color-mix(in srgb, var(--ui-accent) 10%, color-mix(in srgb, var(--ui-bg-chrome) 45%, transparent))',
-        borderColor: `color-mix(in srgb, var(--ui-accent) ${highlightedZone ? 100 : 35}%, transparent)`,
-        margin: highlightedZone ? 2 : 4
-      }}
+      className="pointer-events-none absolute inset-0 z-40"
+      style={{ animation: `hermes-zone-fade ${FADE_IN_DURATION_MILLIS}ms linear both` }}
     >
-      {primary && (
-        <DropTargets
-          multi={(hint?.groupIds?.length ?? 0) > 1}
-          pos={hint?.pos ?? 'center'}
-          source={isDragSource}
-          stackLabel={isEmpty ? 'move here' : 'stack here'}
-        />
-      )}
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Directional drop targets (primary zone only)
-// ---------------------------------------------------------------------------
-
-const DROP_CHIPS: { arrow: string; pos: Exclude<DropPosition, 'center'> }[] = [
-  { arrow: 'arrow-up', pos: 'top' },
-  { arrow: 'arrow-right', pos: 'right' },
-  { arrow: 'arrow-down', pos: 'bottom' },
-  { arrow: 'arrow-left', pos: 'left' }
-]
-
-const CHIP_SPOT: Record<Exclude<DropPosition, 'center'>, string> = {
-  bottom: 'left-1/2 top-full mt-1.5 -translate-x-1/2',
-  left: 'right-full top-1/2 mr-1.5 -translate-y-1/2',
-  right: 'left-full top-1/2 ml-1.5 -translate-y-1/2',
-  top: 'bottom-full left-1/2 mb-1.5 -translate-x-1/2'
-}
-
-const DROP_BADGE_ACTIVE = 'border-(--ui-accent) bg-(--ui-accent) text-(--ui-accent-foreground,white)'
-const DROP_BADGE_IDLE = 'border-(--ui-stroke-secondary) bg-popover text-(--ui-text-secondary)'
-
-/**
- * The badge cluster: "stack here" in the middle, arrow chips on each side.
- * Chips are `data-drop-pos` hit targets for the drag's elementsFromPoint
- * probe (pointer-events back ON — pointer capture keeps the events flowing
- * to the drag handle, this only makes them hit-testable). The active target
- * — chip under the pointer, or the coarse edge band — lights up.
- */
-function DropTargets({
-  multi,
-  pos,
-  source,
-  stackLabel
-}: {
-  multi: boolean
-  pos: DropPosition
-  source: boolean
-  stackLabel: string
-}) {
-  const label = multi ? 'span here' : source ? 'stays here' : stackLabel
-
-  return (
-    <span className="relative inline-flex">
-      <span
+      <div
         className={cn(
-          'rounded-md border px-2 py-1 text-[0.64rem] font-semibold uppercase tracking-[0.16em] transition-colors duration-75',
-          multi || pos === 'center' ? DROP_BADGE_ACTIVE : DROP_BADGE_IDLE
+          DROP_SHEET_CLASS,
+          'absolute flex items-center justify-center transition-all duration-150 ease-out',
+          // Blur only the live target — idle outlines must not fog the app.
+          active && !centerLink && DROP_SHEET_BLUR_CLASS,
+          centerLink && 'opacity-0'
         )}
+        style={{
+          ...REGION[pos],
+          // Accent over a card wash so the fill dims content on dark themes
+          // (a bare accent alpha disappears there).
+          background: active
+            ? 'color-mix(in srgb, var(--ui-accent) 18%, color-mix(in srgb, var(--dt-card) 55%, transparent))'
+            : 'color-mix(in srgb, var(--ui-accent) 5%, color-mix(in srgb, var(--dt-card) 25%, transparent))',
+          borderColor: `color-mix(in srgb, var(--ui-accent) ${active ? 75 : 28}%, transparent)`
+        }}
       >
-        {label}
-      </span>
-      {!multi && <DropChips pos={pos} />}
-    </span>
-  )
-}
-
-function DropChips({ pos }: { pos: DropPosition }) {
-  return (
-    <>
-      {DROP_CHIPS.map(chip => (
-          <span
-          className={cn(
-            'pointer-events-auto absolute grid size-6 place-items-center rounded-md border transition-colors duration-75',
-            CHIP_SPOT[chip.pos],
-            pos === chip.pos ? DROP_BADGE_ACTIVE : DROP_BADGE_IDLE
-          )}
-          data-drop-pos={chip.pos}
-          key={chip.pos}
-        >
-          <Codicon name={chip.arrow} size="0.75rem" />
-        </span>
-      ))}
-    </>
+        {pill && <DropPill icon={pill.icon}>{pill.label}</DropPill>}
+      </div>
+    </div>
   )
 }

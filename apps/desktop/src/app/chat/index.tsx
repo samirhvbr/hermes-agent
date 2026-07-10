@@ -7,6 +7,7 @@ import { useLocation } from 'react-router-dom'
 
 import { Thread } from '@/components/assistant-ui/thread'
 import { Backdrop } from '@/components/Backdrop'
+import { $dropHint, $treeDragging, SESSION_TILE_DRAG } from '@/components/pane-shell/tree/store'
 import { PromptOverlays } from '@/components/prompt-overlays'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
@@ -45,9 +46,10 @@ import { droppedFileInlineRefs, type SessionDragPayload, sessionInlineRef } from
 import { useComposerScope } from './composer/scope'
 import type { ChatBarState } from './composer/types'
 import { type DroppedFile, partitionDroppedFiles } from './hooks/use-composer-actions'
-import { useFileDropZone } from './hooks/use-file-drop-zone'
+import { type DragKind, useFileDropZone } from './hooks/use-file-drop-zone'
 import { useRuntimeMessageRepository } from './runtime-repository'
 import { ScrollToBottomButton } from './scroll-to-bottom-button'
+import { SessionTileDropBridge } from './session-tile-drop-bridge'
 import { useSessionView } from './session-view'
 import { SessionActionsMenu } from './sidebar/session-actions-menu'
 import { threadLoadingState } from './thread-loading'
@@ -243,6 +245,10 @@ export function ChatView({
   const composerScope = useComposerScope()
   const isPrimary = view.kind === 'primary'
   const activeSessionId = useStore(view.$runtimeId)
+  const storedId = useStore(view.$storedId)
+  // Dock anchor for a session drop onto this surface: the workspace pane for the
+  // primary, this tile's pane id for a tile. Read by the session-drop bridge.
+  const sessionAnchor = isPrimary ? 'workspace' : `session-tile:${storedId ?? ''}`
   const awaitingResponse = useStore(view.$awaitingResponse)
   const busy = useStore(view.$busy)
   const contextSuggestions = useStore($contextSuggestions)
@@ -378,8 +384,9 @@ export function ChatView({
     [composerScope.target, currentCwd, onAttachDroppedItems]
   )
 
-  // Dropping a sidebar session inserts an @session link the agent can resolve
-  // via session_search (carries the source profile, so cross-profile works).
+  // Dropping a sidebar session inserts an @session link (the existing
+  // "link to chat" affordance) — kept as-is. The tiling bridge only claims
+  // EDGE drops; center drops fall through here.
   const onDropSession = useCallback(
     (session: SessionDragPayload) => {
       requestComposerInsertRefs([sessionInlineRef(session)], { target: composerScope.target })
@@ -389,14 +396,29 @@ export function ChatView({
 
   const { dragKind, dropHandlers } = useFileDropZone({ enabled: showChatBar, onDropFiles, onDropSession })
 
+  // While a session drag targets one of this surface's EDGES (tile drop), the
+  // zone overlay owns the visual — the link overlay stands down.
+  // The link overlay is driven by the GLOBAL drag signal (the tiling bridge's
+  // sentinel, derived from native drag types), not this surface's dragenter
+  // chain — it must show for the whole drag on every chat surface, standing
+  // down only while an edge (split) target is aimed.
+  const dropHint = useStore($dropHint)
+  const sessionDragging = useStore($treeDragging) === SESSION_TILE_DRAG
+  const sessionEdgeHover = Boolean(dropHint?.pos && dropHint.pos !== 'center')
+
+  const overlayKind: DragKind =
+    dragKind === 'files' ? 'files' : (sessionDragging || dragKind === 'session') && !sessionEdgeHover ? 'session' : null
+
   return (
     <div
       className={cn(
         'relative isolate flex h-full min-w-0 flex-col overflow-hidden bg-(--ui-chat-surface-background)',
         className
       )}
+      data-session-anchor={sessionAnchor}
     >
       <Backdrop />
+      {isPrimary && <SessionTileDropBridge />}
       {/* Tiles get their chrome from the layout zone (chip strip); the modal
           prompt overlays stay active-session-scoped in the primary surface. */}
       {isPrimary && (
@@ -409,7 +431,10 @@ export function ChatView({
         />
       )}
 
-      {isPrimary && <PromptOverlays />}
+      {/* Mounted for the primary AND every tile, each scoped to its own session
+          so a tiled/background session's blocking prompt surfaces instead of
+          stalling to timeout. */}
+      <PromptOverlays sessionId={activeSessionId} />
 
       <ChatRuntimeBoundary
         busy={busy}
@@ -453,7 +478,9 @@ export function ChatView({
             </div>
           )}
           {showChatBar && <ScrollToBottomButton />}
-          <ChatDropOverlay kind={dragKind} />
+          {/* A session drag hovering an EDGE hands the visual to the zone
+              target; the link overlay shows only for the center region. */}
+          <ChatDropOverlay kind={overlayKind} />
           <ChatSwapOverlay profile={gatewaySwapTarget} />
         </div>
         {/* Composer renders OUTSIDE the contain:[layout paint] wrapper above:
