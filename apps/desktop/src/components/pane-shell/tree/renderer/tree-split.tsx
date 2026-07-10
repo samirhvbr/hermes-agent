@@ -448,7 +448,7 @@ export function TreeSplit({ node, root }: { node: SplitNode; root?: boolean }) {
                 onPointerDown={e => startSash(partner, i, e)}
               />
             )}
-            {!narrowCollapsed && <TreeNode node={child} />}
+            {!narrowCollapsed && <TreeNode node={child} parentAxis={axis} />}
           </div>
         )
       })}

@@ -116,7 +116,7 @@ function ZoneMenu({
   )
 }
 
-export function TreeGroup({ node }: { node: GroupNode }) {
+export function TreeGroup({ node, parentAxis }: { node: GroupNode; parentAxis?: 'column' | 'row' }) {
   const { t } = useI18n()
   const ref = useRef<HTMLDivElement>(null)
   const stripRef = useRef<HTMLDivElement>(null)
@@ -162,7 +162,14 @@ export function TreeGroup({ node }: { node: GroupNode }) {
   })
 
   const headerHidden = node.headerHidden ?? (shown.length <= 1 && !hasLoneTile)
-  const headerVisible = !isEmpty && (Boolean(node.minimized) || !headerHidden)
+
+  // A group collapses ALONG its parent split's axis. In a row that means the
+  // WIDTH collapses — a full-width horizontal header would strand a tall
+  // empty column, so the minimized form is a narrow vertical rail instead
+  // (tabs reading top-to-bottom). In a column (stacked zones) the horizontal
+  // header IS the collapsed form, exactly as before.
+  const verticalCollapse = Boolean(node.minimized) && parentAxis === 'row' && !isEmpty
+  const headerVisible = !isEmpty && !verticalCollapse && (Boolean(node.minimized) || !headerHidden)
 
   // Drag handles preventDefault pointerdown (no native dblclick), so the
   // header + chips share a synthesized double-tap: restore if collapsed
@@ -263,6 +270,52 @@ export function TreeGroup({ node }: { node: GroupNode }) {
           className="pointer-events-none absolute z-10 [-webkit-app-region:drag]"
           style={{ height: wcOverlap.height, left: wcOverlap.x, top: wcOverlap.y, width: wcOverlap.width }}
         />
+      )}
+
+      {/* Minimized in a ROW: a narrow vertical rail — width collapses to the
+          strip, tabs read top-to-bottom. Click a tab to restore + activate;
+          click anywhere else on the rail to just restore. */}
+      {verticalCollapse && (
+        <ZoneMenu {...zoneMenu}>
+          <div
+            className={cn(
+              'flex h-full w-7 shrink-0 cursor-pointer select-none flex-col items-stretch bg-(--pane-tab-strip-bg) [--pane-tab-strip-bg:var(--theme-card-seed)]',
+              'shadow-[inset_-1px_0_0_var(--ui-stroke-tertiary)]'
+            )}
+            onClick={() => toggleTreeGroupMinimized(node.id, false)}
+            title={t.zones.restore}
+          >
+            <div
+              className="flex min-h-0 flex-col overflow-y-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              role="tablist"
+            >
+              {shown.map(paneId => {
+                const title = paneFor(paneId)?.title ?? paneId
+
+                return (
+                  <button
+                    aria-selected={paneId === activeId}
+                    className={cn(
+                      'flex max-h-40 shrink-0 items-center justify-center border-b border-b-(--ui-stroke-quaternary) px-1.5 py-2.5 text-[0.6875rem] font-medium [writing-mode:vertical-rl] hover:text-foreground',
+                      paneId === activeId ? 'text-(--ui-text-secondary)' : 'text-(--ui-text-tertiary)'
+                    )}
+                    data-tree-tab={paneId}
+                    key={paneId}
+                    onClick={event => {
+                      event.stopPropagation()
+                      toggleTreeGroupMinimized(node.id, false)
+                      activateTreePane(node.id, paneId)
+                    }}
+                    role="tab"
+                    type="button"
+                  >
+                    <span className="truncate">{title}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        </ZoneMenu>
       )}
 
       {/* Header: the file-preview tab strip (PaneTab), one shared component. */}
