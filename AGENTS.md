@@ -1,3 +1,18 @@
+<!-- FORK-SAMIRHVBR:START — bloco do fork operacional; removível em PRs para o upstream -->
+> **Fork operacional `samirhvbr/hermes-agent`.** Este repositório é um fork de
+> [`NousResearch/hermes-agent`](https://github.com/NousResearch/hermes-agent), mantido para
+> uso/operação próprios. Melhorias voltam como PR para o upstream.
+>
+> **Convenções do nosso fork** (versão, commits, deploy): **[CLAUDE.md](CLAUDE.md)** ·
+> versão em [`version.md`](version.md) · deploy em [`deploy.sh`](deploy.sh) ·
+> segurança operacional em [SECURITY_GUIDELINES.md](SECURITY_GUIDELINES.md).
+>
+> **Ao preparar um PR para o upstream**, ramifique de `upstream/main` (sem os arquivos de fork)
+> e use Conventional Commits em inglês. Passo a passo em [CLAUDE.md](CLAUDE.md#2-branches-destinadas-a-pr-para-o-upstream).
+>
+> O conteúdo abaixo é o **guia de desenvolvimento do upstream**, preservado na íntegra.
+<!-- FORK-SAMIRHVBR:END -->
+
 # Hermes Agent - Development Guide
 
 Instructions for AI coding assistants and developers working on the hermes-agent codebase.

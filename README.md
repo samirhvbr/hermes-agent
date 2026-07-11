@@ -1,3 +1,11 @@
+<!-- FORK-SAMIRHVBR:START — operational fork banner; removable for upstream PRs -->
+> **Operational fork — [`samirhvbr/hermes-agent`](https://github.com/samirhvbr/hermes-agent).**
+> A downstream fork of [`NousResearch/hermes-agent`](https://github.com/NousResearch/hermes-agent),
+> maintained for self-hosting / operation. Improvements are sent back upstream as PRs.
+> Fork conventions & deploy: [CLAUDE.md](CLAUDE.md) · [version.md](version.md) · [deploy.sh](deploy.sh) · [README_br.md](README_br.md) (pt-BR).
+> Everything below is the upstream project README, preserved.
+<!-- FORK-SAMIRHVBR:END -->
+
 <p align="center">
   <img src="assets/banner.png" alt="Hermes Agent" width="100%">
 </p>
