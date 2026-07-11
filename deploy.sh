@@ -110,6 +110,11 @@ flock -n 9 || { printf '❌ outro deploy já está rodando (lock: %s)\n' "$LOCK"
 
 cd "$DIR" || { printf '❌ %s não existe\n' "$DIR" >&2; exit 1; }
 
+# Registra o diretório como "safe" para o usuário que roda o script — evita
+# "detected dubious ownership" quando o dono do repo != usuário atual (ex.: repo
+# clonado por outro usuário e deploy rodado como root). Idempotente.
+git config --global --add safe.directory "$DIR" 2>/dev/null || true
+
 # Variáveis de notificação do .env.
 TG_BOT=$(get_env DEPLOY_TELEGRAM_BOT_TOKEN)
 TG_CHAT=$(get_env DEPLOY_TELEGRAM_CHAT_ID)
