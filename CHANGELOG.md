@@ -14,6 +14,13 @@ never rewritten.
 > one.
 
 
+## 0.1.10 - the permission lists follow repodocs: five commands move to ask, seven rules leave deny
+
+`rm -rf` and `curl`/`wget` piped into a shell leave `deny` and now ask for confirmation.
+Reading `.env`/`.env.*`, `git push --force`/`-f`, `git reset --hard` and `git clean -fd`
+leave `deny`. Key reads (`*.pem`, `*.key`, `*.p8`, `*.p12`, `*.pfx`) stay blocked. The
+owner's decision on 24/09/2026, replicated from repodocs 1.17.0 (ADR-028).
+
 ## 0.1.9 - the repository stops choosing the model
 
 `CLAUDE_CODE_SUBAGENT_MODEL` leaves `.claude/settings.json`. The model is now the user's
