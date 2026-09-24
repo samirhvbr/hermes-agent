@@ -55,9 +55,12 @@ git push origin main
 
 ## Configuração do agente
 
-Ver [.claude/settings.json](.claude/settings.json): modelo `opus` (Opus 4.8), effort `max`,
-modo padrão `plan` (pede aprovação antes de ações destrutivas). Ver também o [AGENTS.md](AGENTS.md)
-do upstream para o modelo mental do código.
+**The model is the user's choice**, made per session with `/model`; a subagent inherits the
+session's model. The repository chooses none of it: [.claude/settings.json](.claude/settings.json)
+carries no model key and no model environment variable (repodocs ADR-027). What that file does
+set is effort `max` and the default mode `plan` — approval before destructive actions.
+
+For the mental model of the code, see the upstream [AGENTS.md](AGENTS.md).
 
 ---
 
