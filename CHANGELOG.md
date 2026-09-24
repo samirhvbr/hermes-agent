@@ -14,6 +14,24 @@ never rewritten.
 > one.
 
 
+## 0.1.8 - the model pin leaves .claude/settings.json
+
+`"model": "opus[1m]"` and `env.ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-5` are gone, and the
+profile comment that prescribed them now says why. The suffix was the trap: `opus[1m]` reads
+as a window choice and behaves as a version pin, because the 1M variant existed only for the
+previous Opus — so the alias that promised "always the newest Opus" was silently cancelled by
+the thing next to it. The env pin is worse than a pin: it redefines what `opus` means for
+everything that reads it, the `/model` picker included, which is how the newer model stopped
+being selectable at all.
+
+This repository was one of six in the fleet still carrying the env pin alive when it was
+measured on 24/09/2026. It changes nothing by itself — the deciding layer is the account's
+server-managed settings, which outrank every local file — and that is written down in
+repodocs ADR-026, along with what to write instead: name the version, `"model": "opus55"`,
+never an alias plus a window suffix.
+
+Nothing to test: two JSON keys and a comment. Checked that the file still parses.
+
 ## 0.1.7 - the git hooks are regenerated from repodocs
 
 Both hooks of the standard are rewritten from repodocs, and `tools/release.sh`
